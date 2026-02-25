@@ -11,7 +11,15 @@ import {
 } from "~~/server/utils/email";
 import { lookupMx, type MxLookupResult } from "~~/server/utils/dns-cache";
 import { verifySmtp } from "~~/server/utils/smtp";
-import { checkRateLimit } from "~~/server/utils/rate-limit";
+import {
+  checkRequestRate,
+  checkDailyEmailCap,
+  recordEmailsUsed,
+  checkGlobalCap,
+  recordGlobalEmails,
+  acquireConcurrency,
+  releaseConcurrency,
+} from "~~/server/utils/rate-limit";
 import { checkDomainHealth, type DomainHealth } from "~~/server/utils/domain-health";
 import { detectTypo } from "~~/server/utils/typo";
 import { checkMicrosoftAccount, isMicrosoftDomain } from "~~/server/utils/microsoft-check";
@@ -20,6 +28,9 @@ import { getDomainIntel, type DomainIntel } from "~~/server/utils/domain-intel";
 import { analyzeLocalPart, detectBulkAnomalies } from "~~/server/utils/pattern-analysis";
 import { checkGitHub } from "~~/server/utils/github-check";
 import { checkPgpKey } from "~~/server/utils/pgp-check";
+import { checkGoogleAccount, isGoogleDomain } from "~~/server/utils/google-check";
+import { checkAppleAccount, isAppleDomain } from "~~/server/utils/apple-check";
+import { checkHIBP } from "~~/server/utils/hibp-check";
 import type { ProviderChecks, DomainIntelSummary } from "~~/types/verify";
 import type { ProviderSignals, IntelSignals } from "~~/server/utils/email";
 
@@ -31,15 +42,20 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     getRequestHeader(event, "x-real-ip") ||
     "unknown";
 
-  if (
-    !checkRateLimit(
-      ip,
-      config.rateLimitWindowMs as number,
-      config.rateLimitMaxRequests as number,
-    )
-  ) {
-    throw createError({ statusCode: 429, statusMessage: "Too many requests" });
+  // 1. Per-IP request rate
+  const rateCheck = checkRequestRate(ip, config.rateLimitRequestsPerMinute as number);
+  if (!rateCheck.allowed) {
+    setResponseHeader(event, "Retry-After", String(Math.ceil((rateCheck.retryAfterMs ?? 60_000) / 1000)));
+    throw createError({ statusCode: 429, statusMessage: rateCheck.reason });
   }
+
+  // 2. Concurrency guard
+  const concCheck = acquireConcurrency(ip, config.rateLimitMaxConcurrent as number);
+  if (!concCheck.allowed) {
+    throw createError({ statusCode: 429, statusMessage: concCheck.reason });
+  }
+
+  try {
 
   const body = await readBody<VerifyRequest>(event);
   if (!body?.emails || !Array.isArray(body.emails)) {
@@ -50,6 +66,20 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
       statusCode: 400,
       statusMessage: `Max ${config.maxEmailsPerRequest} emails per request`,
     });
+  }
+
+  // 3. Per-IP daily email cap
+  const dailyCheck = checkDailyEmailCap(ip, body.emails.length, config.rateLimitDailyEmailCap as number);
+  if (!dailyCheck.allowed) {
+    setResponseHeader(event, "Retry-After", String(Math.ceil((dailyCheck.retryAfterMs ?? 86_400_000) / 1000)));
+    throw createError({ statusCode: 429, statusMessage: dailyCheck.reason });
+  }
+  const emailsToProcess = body.emails.slice(0, dailyCheck.allowedCount);
+
+  // 4. Global daily ceiling
+  const globalCheck = checkGlobalCap(emailsToProcess.length, config.rateLimitGlobalDailyCap as number);
+  if (!globalCheck.allowed) {
+    throw createError({ statusCode: 503, statusMessage: globalCheck.reason });
   }
 
   const limit = pLimit(config.dnsConcurrency as number);
@@ -95,7 +125,7 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
   }
 
   // Pre-parse emails for bulk anomaly detection
-  const parsedEmails = body.emails.map((raw) => {
+  const parsedEmails = emailsToProcess.map((raw) => {
     const email = normalizeEmail(raw);
     const parsed = parseEmail(email);
     return { email, local: parsed?.local ?? "", domain: parsed?.domain ?? "" };
@@ -105,7 +135,7 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     : new Map<string, string[]>();
 
   const results: VerifyResult[] = await Promise.all(
-    body.emails.map(async (raw) => {
+    emailsToProcess.map(async (raw) => {
       const email = normalizeEmail(raw);
       const syntaxOk = isValidSyntax(email);
       const parsed = parseEmail(email);
@@ -154,29 +184,50 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
           if (smtp === "error") notes.push("SMTP verification inconclusive");
         }
 
-        // Detect Microsoft 365 tenants by MX records pointing to *.mail.protection.outlook.com
+        // Detect provider-specific domains
         const isMsHosted = isMicrosoftDomain(domain) ||
           mxHosts.some((h) => h.endsWith(".mail.protection.outlook.com"));
+        const isGoogleHosted = isGoogleDomain(domain, mxHosts);
+        const isAppleHosted = isAppleDomain(domain);
 
         // Provider-specific checks (run when SMTP is inconclusive or for extra confirmation)
         const smtpInconclusive = smtp === "error" || smtp === null;
         const runMicrosoft = isMsHosted && (smtpInconclusive || smtp === "rejected");
+        const runGoogle = isGoogleHosted && (smtpInconclusive || smtp === "rejected");
+        const runApple = isAppleHosted && (smtpInconclusive || smtp === "rejected");
         const runGravatar = smtpInconclusive;
-        const isSingleMode = body.emails.length === 1;
+        const isSingleMode = emailsToProcess.length === 1;
         const runGitHub = isSingleMode && smtpInconclusive;
         const runPgp = smtpInconclusive;
+        const hibpKey = (config.hibpApiKey as string) || undefined;
+        const runHIBP = smtpInconclusive && !!hibpKey;
 
-        const [msResult, gravatarResult, githubResult, pgpResult] = await Promise.all([
+        const [msResult, googleResult, appleResult, gravatarResult, githubResult, pgpResult, hibpResult] = await Promise.all([
           runMicrosoft ? limit(() => checkMicrosoftAccount(email)) : Promise.resolve(null),
+          runGoogle ? checkGoogleAccount(email) : Promise.resolve(null),
+          runApple ? checkAppleAccount(email) : Promise.resolve(null),
           runGravatar ? limit(() => checkGravatar(email)) : Promise.resolve(null),
           runGitHub ? checkGitHub(email) : Promise.resolve(null),
           runPgp ? limit(() => checkPgpKey(email)) : Promise.resolve(null),
+          runHIBP ? checkHIBP(email, hibpKey) : Promise.resolve(null),
         ]);
 
         if (msResult && !msResult.throttled) {
           providerChecks.microsoft = msResult.exists;
           if (msResult.exists === true) notes.push("Microsoft account confirmed to exist");
           if (msResult.exists === false) notes.push("Microsoft account does not exist");
+        }
+
+        if (googleResult !== null) {
+          providerChecks.google = googleResult;
+          if (googleResult === true) notes.push("Google account confirmed to exist");
+          if (googleResult === false) notes.push("Google account does not exist");
+        }
+
+        if (appleResult !== null) {
+          providerChecks.apple = appleResult;
+          if (appleResult === true) notes.push("Apple ID confirmed to exist");
+          if (appleResult === false) notes.push("Apple ID does not exist");
         }
 
         if (gravatarResult !== null) {
@@ -194,7 +245,13 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
           if (pgpResult === true) notes.push("PGP public key published for this email");
         }
 
-        if (domain && isMajorProvider(domain) && (smtp === "error" || smtp === null)) {
+        if (hibpResult !== null) {
+          providerChecks.hibp = hibpResult.breached;
+          if (hibpResult.breached) notes.push(`Email found in ${hibpResult.breachCount} data breach${hibpResult.breachCount > 1 ? "es" : ""} (confirms real address)`);
+        }
+
+        if (domain && isMajorProvider(domain) && (smtp === "error" || smtp === null)
+          && googleResult === null && appleResult === null) {
           notes.push("Major email provider — direct mailbox verification blocked by policy");
         }
 
@@ -251,9 +308,12 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
 
       const providers: ProviderSignals = {
         microsoftExists: providerChecks.microsoft,
+        googleExists: providerChecks.google,
+        appleExists: providerChecks.apple,
         hasGravatar: providerChecks.gravatar,
         hasGitHub: providerChecks.github,
         hasPgpKey: providerChecks.pgp,
+        hibpBreached: providerChecks.hibp,
         isMajorProvider: domain ? isMajorProvider(domain) : false,
       };
 
@@ -273,5 +333,12 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     }),
   );
 
+  recordEmailsUsed(ip, results.length);
+  recordGlobalEmails(results.length);
+
   return { results };
+
+  } finally {
+    releaseConcurrency(ip);
+  }
 });

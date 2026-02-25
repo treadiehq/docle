@@ -7,6 +7,9 @@ export interface ProviderChecks {
   gravatar?: boolean | null;
   github?: boolean | null;
   pgp?: boolean | null;
+  google?: boolean | null;
+  apple?: boolean | null;
+  hibp?: boolean | null;
 }
 
 export interface DomainIntelSummary {

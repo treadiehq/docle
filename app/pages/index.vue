@@ -90,12 +90,26 @@ async function verifyBulk() {
   try {
     for (let i = 0; i < emails.length; i += BATCH_SIZE) {
       const batch = emails.slice(i, i + BATCH_SIZE);
-      const data = await $fetch<VerifyResponse>("/api/verify", {
-        method: "POST",
-        body: { emails: batch },
-      });
-      bulkResults.value.push(...data.results);
-      bulkProgress.value = Math.min(bulkResults.value.length, emails.length);
+      try {
+        const data = await $fetch<VerifyResponse>("/api/verify", {
+          method: "POST",
+          body: { emails: batch },
+        });
+        bulkResults.value.push(...data.results);
+        bulkProgress.value = Math.min(bulkResults.value.length, emails.length);
+      } catch (e: any) {
+        const status = e?.response?.status || e?.statusCode;
+        const msg = e?.data?.statusMessage || e?.message || "Request failed";
+        if (status === 429) {
+          bulkError.value = msg + (bulkResults.value.length > 0 ? ` (${bulkResults.value.length} emails verified before limit hit)` : "");
+          break;
+        }
+        if (status === 503) {
+          bulkError.value = msg;
+          break;
+        }
+        throw e;
+      }
     }
   } catch (e: any) {
     bulkError.value = e?.data?.statusMessage || e?.message || "Request failed";
@@ -132,14 +146,17 @@ function statusColor(status: VerifyStatus) {
 }
 
 function smtpLabel(r: VerifyResult) {
+  const providerConfirmed = r.providerChecks?.google === true
+    || r.providerChecks?.apple === true
+    || r.providerChecks?.microsoft === true;
   const isMajor = r.notes?.some((n) => n.includes("Major email provider"));
   switch (r.smtp) {
     case "accepted":   return "Accepted";
-    case "rejected":   return "Rejected";
+    case "rejected":   return providerConfirmed ? "Provider confirmed" : "Rejected";
     case "catch-all":  return "Catch-all";
     case "greylisted": return "Greylisted";
-    case "error":      return isMajor ? "Blocked by provider" : "Inconclusive";
-    default:           return isMajor ? "Blocked by provider" : "—";
+    case "error":      return providerConfirmed ? "Provider confirmed" : isMajor ? "Blocked by provider" : "Inconclusive";
+    default:           return providerConfirmed ? "Provider confirmed" : isMajor ? "Blocked by provider" : "—";
   }
 }
 
@@ -174,10 +191,16 @@ function explain(r: VerifyResult): string {
   const grav = r.providerChecks?.gravatar;
   const gh = r.providerChecks?.github;
   const pgp = r.providerChecks?.pgp;
+  const goog = r.providerChecks?.google;
+  const apple = r.providerChecks?.apple;
+  const hibp = r.providerChecks?.hibp;
   const dw = domainWarnings(r);
 
   if (r.status === "Valid") {
+    if (goog === true) return `This email exists. We confirmed it directly with Google's account system. The domain ${r.domain} is properly configured and the account is active. Safe to send.${dw}`;
+    if (apple === true) return `This email exists. We confirmed it directly with Apple's account system. The domain ${r.domain} is properly configured and the Apple ID is active. Safe to send.${dw}`;
     if (ms === true) return `This email exists. We confirmed it directly with Microsoft's account system. The domain ${r.domain} is properly configured and the account is active. Safe to send.${dw}`;
+    if (hibp === true && r.smtp !== "accepted") return `This email is very likely valid. It appears in known data breaches, which confirms a real account was registered with this address. The domain ${r.domain} has active mail servers.${dw}`;
     if (gh === true && r.smtp !== "accepted") return `This email is likely valid. We found a GitHub account using this email address, confirming a real person owns it. The domain ${r.domain} has mail servers configured.${dw}`;
     if (pgp === true && r.smtp !== "accepted") return `This email is likely valid. A PGP public key has been published for this address, confirming someone actively uses it. The domain ${r.domain} has mail servers configured.${dw}`;
     if (grav === true && r.smtp !== "accepted") return `This email is likely valid. We found an active Gravatar profile linked to this address, which means a real person uses it. The domain ${r.domain} has mail servers configured.${dw}`;
@@ -188,6 +211,8 @@ function explain(r: VerifyResult): string {
   if (r.status === "Invalid") {
     if (!r.domain) return "This doesn't look like a valid email address.";
     if (r.mx === false) return `The domain ${r.domain} has no mail servers configured. Any email sent here will bounce.${dw}`;
+    if (goog === false) return `This account does not exist. We checked directly with Google's account system and confirmed there is no Gmail/Google account for this address. Your email would bounce.`;
+    if (apple === false) return `This account does not exist. We checked directly with Apple's account system and confirmed there is no Apple ID for this address. Your email would bounce.`;
     if (ms === false) return `This account does not exist. We checked directly with Microsoft's account system and confirmed there is no mailbox for this address. Your email would bounce.`;
     if (r.smtp === "rejected") return `The domain ${r.domain} has mail servers, but the server said this specific mailbox does not exist. Your email would bounce.${dw}`;
     return `This email address has problems that would prevent delivery.${dw}`;

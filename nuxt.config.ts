@@ -48,12 +48,15 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
-    maxEmailsPerRequest: 10_000,
+    maxEmailsPerRequest: 500,
     dnsCacheTtlMs: 10 * 60 * 1000,
     dnsTimeoutMs: 5_000,
     dnsConcurrency: 20,
-    rateLimitWindowMs: 60_000,
-    rateLimitMaxRequests: 30,
     smtpTimeoutMs: 10_000,
+    hibpApiKey: "",
+    rateLimitRequestsPerMinute: 10,
+    rateLimitDailyEmailCap: 500,
+    rateLimitMaxConcurrent: 2,
+    rateLimitGlobalDailyCap: 50_000,
   },
 });

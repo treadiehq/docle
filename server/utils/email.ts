@@ -58,6 +58,9 @@ export interface ProviderSignals {
   hasGravatar?: boolean | null;
   hasGitHub?: boolean | null;
   hasPgpKey?: boolean | null;
+  googleExists?: boolean | null;
+  appleExists?: boolean | null;
+  hibpBreached?: boolean | null;
   isMajorProvider?: boolean;
 }
 
@@ -82,10 +85,15 @@ export function computeStatus(
   if (mx === null) return "Unknown";
   if (!mx) return "Invalid";
 
-  if (smtp === "rejected" && providers?.microsoftExists !== true) return "Invalid";
+  if (smtp === "rejected" && providers?.microsoftExists !== true && providers?.googleExists !== true && providers?.appleExists !== true) return "Invalid";
 
   if (providers?.microsoftExists === false) return "Invalid";
+  if (providers?.googleExists === false) return "Invalid";
+  if (providers?.appleExists === false) return "Invalid";
+
   if (providers?.microsoftExists === true && riskFlags.length === 0) return "Valid";
+  if (providers?.googleExists === true && riskFlags.length === 0) return "Valid";
+  if (providers?.appleExists === true && riskFlags.length === 0) return "Valid";
 
   if (smtp === "catch-all") return "Risky";
   if (smtp === "greylisted") return "Risky";
@@ -96,6 +104,7 @@ export function computeStatus(
   if (providers?.hasGravatar === true) return "Valid";
   if (providers?.hasGitHub === true) return "Valid";
   if (providers?.hasPgpKey === true) return "Valid";
+  if (providers?.hibpBreached === true) return "Valid";
 
   if (providers?.isMajorProvider && (smtp === "error" || smtp === null)) return "Valid";
 
@@ -141,9 +150,14 @@ export function computeConfidence(
 
   if (providers?.microsoftExists === true) score = Math.max(score, 95);
   if (providers?.microsoftExists === false) score = Math.min(score, 5);
+  if (providers?.googleExists === true) score = Math.max(score, 96);
+  if (providers?.googleExists === false) score = Math.min(score, 5);
+  if (providers?.appleExists === true) score = Math.max(score, 95);
+  if (providers?.appleExists === false) score = Math.min(score, 5);
   if (providers?.hasGravatar === true) score = Math.max(score, 85);
   if (providers?.hasGitHub === true) score = Math.max(score, 90);
   if (providers?.hasPgpKey === true) score = Math.max(score, 88);
+  if (providers?.hibpBreached === true) score = Math.max(score, 87);
 
   if (implicitMx && score > 50) score -= 15;
 
