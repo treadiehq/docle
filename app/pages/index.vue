@@ -494,7 +494,7 @@ function toggleFaq(idx: number) {
       <!-- ─── Footer ─── -->
       <footer class="mx-auto mt-auto w-full max-w-3xl px-6 py-6">
         <div class="flex items-center justify-between">
-          <span class="text-xs text-dim">&copy; 2026 Treadie,Inc</span>
+          <span class="text-xs text-dim">&copy; {{new Date().getFullYear()}} Treadie, Inc.</span>
           <!-- <div class="flex items-center gap-5 text-xs text-dim">
             <a href="#" class="transition hover:text-muted">Terms</a>
             <a href="#" class="transition hover:text-muted">Privacy</a>
