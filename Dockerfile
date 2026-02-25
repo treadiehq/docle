@@ -1,4 +1,4 @@
-FROM node:20 AS build
+FROM node:20-slim
 
 WORKDIR /app
 
@@ -6,13 +6,8 @@ COPY package.json package-lock.json ./
 RUN npm install
 
 COPY . .
-RUN npm run build
-
-FROM node:20-slim
-
-WORKDIR /app
-
-COPY --from=build /app/.output .output
+RUN npm run build \
+    && rm -rf node_modules app server types
 
 ENV HOST=0.0.0.0
 ENV PORT=3000
