@@ -131,14 +131,15 @@ function statusColor(status: VerifyStatus) {
   }
 }
 
-function smtpLabel(smtp: VerifyResult["smtp"]) {
-  switch (smtp) {
+function smtpLabel(r: VerifyResult) {
+  const isMajor = r.notes?.some((n) => n.includes("Major email provider"));
+  switch (r.smtp) {
     case "accepted":   return "Accepted";
     case "rejected":   return "Rejected";
     case "catch-all":  return "Catch-all";
     case "greylisted": return "Greylisted";
-    case "error":      return "Inconclusive";
-    default:           return "—";
+    case "error":      return isMajor ? "Blocked by provider" : "Inconclusive";
+    default:           return isMajor ? "Blocked by provider" : "—";
   }
 }
 
@@ -389,7 +390,7 @@ function toggleFaq(idx: number) {
                     </div>
                     <div>
                       <div class="text-dim">Mailbox</div>
-                      <div class="mt-1 font-mono text-zinc-300">{{ smtpLabel(singleResult.smtp) }}</div>
+                      <div class="mt-1 font-mono text-zinc-300">{{ smtpLabel(singleResult) }}</div>
                     </div>
                     <div>
                       <div class="text-dim">Confidence</div>
@@ -474,7 +475,7 @@ function toggleFaq(idx: number) {
                     <span :class="['inline-block h-1.5 w-1.5 shrink-0 rounded-full', statusDot(r.status)]" />
                     <span class="min-w-0 flex-1 break-all text-zinc-300">{{ r.email }}</span>
                     <span :class="['shrink-0 tabular-nums text-[11px]', confidenceColor(r.confidence)]">{{ r.confidence }}%</span>
-                    <span class="shrink-0 text-dim">{{ smtpLabel(r.smtp) }}</span>
+                    <span class="shrink-0 text-dim">{{ smtpLabel(r) }}</span>
                     <span :class="['shrink-0 font-medium', statusColor(r.status)]">{{ r.status }}</span>
                   </div>
                   <div v-if="expandedRow === idx" class="pb-3 pl-13 pr-4 text-[11px] leading-relaxed text-muted">
