@@ -1,0 +1,7 @@
+name: docle
+setup:
+  - npm install
+apps:
+  - name: docle
+    command: npm run dev
+    port: 3000

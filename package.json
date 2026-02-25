@@ -1,0 +1,19 @@
+{
+  "name": "docle",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "disposable-email-domains": "^1.0.62",
+    "nuxt": "^3.17.7",
+    "p-limit": "^6.2.0",
+    "tailwindcss": "^4.2.1"
+  }
+}
