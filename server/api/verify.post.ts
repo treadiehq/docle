@@ -7,6 +7,7 @@ import {
   getRiskFlags,
   computeStatus,
   computeConfidence,
+  isMajorProvider,
 } from "~~/server/utils/email";
 import { lookupMx, type MxLookupResult } from "~~/server/utils/dns-cache";
 import { verifySmtp } from "~~/server/utils/smtp";
@@ -193,6 +194,10 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
           if (pgpResult === true) notes.push("PGP public key published for this email");
         }
 
+        if (domain && isMajorProvider(domain) && (smtp === "error" || smtp === null)) {
+          notes.push("Major email provider — direct mailbox verification blocked by policy");
+        }
+
         if (domainHealth && !domainHealth.hasSPF && !domainHealth.hasDMARC) {
           notes.push("Domain has no email authentication records (SPF/DMARC)");
         }
@@ -249,6 +254,7 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
         hasGravatar: providerChecks.gravatar,
         hasGitHub: providerChecks.github,
         hasPgpKey: providerChecks.pgp,
+        isMajorProvider: domain ? isMajorProvider(domain) : false,
       };
 
       const intel: IntelSignals = {

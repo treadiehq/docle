@@ -31,11 +31,34 @@ export function getRiskFlags(local: string, domain: string): string[] {
   return flags;
 }
 
+const MAJOR_PROVIDERS = new Set([
+  "gmail.com", "googlemail.com",
+  "yahoo.com", "yahoo.co.uk", "yahoo.co.jp", "yahoo.fr", "yahoo.de", "yahoo.it", "yahoo.es", "yahoo.ca", "yahoo.com.au", "yahoo.com.br", "yahoo.co.in",
+  "ymail.com", "rocketmail.com",
+  "outlook.com", "hotmail.com", "hotmail.co.uk", "hotmail.fr", "hotmail.de", "hotmail.it", "hotmail.es",
+  "live.com", "live.co.uk", "live.fr", "live.de",
+  "msn.com",
+  "icloud.com", "me.com", "mac.com",
+  "protonmail.com", "proton.me", "pm.me",
+  "aol.com",
+  "zoho.com", "zohomail.com",
+  "mail.com",
+  "gmx.com", "gmx.de", "gmx.net",
+  "fastmail.com", "fastmail.fm",
+  "tutanota.com", "tuta.io",
+  "yandex.com", "yandex.ru",
+]);
+
+export function isMajorProvider(domain: string): boolean {
+  return MAJOR_PROVIDERS.has(domain.toLowerCase());
+}
+
 export interface ProviderSignals {
   microsoftExists?: boolean | null;
   hasGravatar?: boolean | null;
   hasGitHub?: boolean | null;
   hasPgpKey?: boolean | null;
+  isMajorProvider?: boolean;
 }
 
 export interface IntelSignals {
@@ -74,6 +97,8 @@ export function computeStatus(
   if (providers?.hasGitHub === true) return "Valid";
   if (providers?.hasPgpKey === true) return "Valid";
 
+  if (providers?.isMajorProvider && (smtp === "error" || smtp === null)) return "Valid";
+
   return "Unknown";
 }
 
@@ -108,7 +133,7 @@ export function computeConfidence(
       break;
     case "error":
     case null:
-      score = 40;
+      score = providers?.isMajorProvider ? 78 : 40;
       break;
     default:
       score = 30;

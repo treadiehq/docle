@@ -180,6 +180,8 @@ function explain(r: VerifyResult): string {
     if (gh === true && r.smtp !== "accepted") return `This email is likely valid. We found a GitHub account using this email address, confirming a real person owns it. The domain ${r.domain} has mail servers configured.${dw}`;
     if (pgp === true && r.smtp !== "accepted") return `This email is likely valid. A PGP public key has been published for this address, confirming someone actively uses it. The domain ${r.domain} has mail servers configured.${dw}`;
     if (grav === true && r.smtp !== "accepted") return `This email is likely valid. We found an active Gravatar profile linked to this address, which means a real person uses it. The domain ${r.domain} has mail servers configured.${dw}`;
+    if (r.smtp !== "accepted" && r.notes?.some((n) => n.includes("Major email provider")))
+      return `This email is on ${r.domain}, a major email provider with active mail servers. The provider blocks direct mailbox verification, but the address is properly formatted and the domain is trusted. Very likely deliverable.${dw}`;
     return `This email looks good. The domain ${r.domain} has mail servers, and the mail server confirmed this specific mailbox exists and accepts mail. Safe to send.${dw}`;
   }
   if (r.status === "Invalid") {
@@ -260,7 +262,7 @@ function toggleFaq(idx: number) {
       <!-- ─── Nav ─── -->
       <nav class="mx-auto flex max-w-3xl items-center justify-between px-6 py-4 w-full">
         <span class="ttext-base font-semibold text-white flex items-center gap-2">
-          <img src="/public/img/logo.png" alt="Docle" class="w-7 h-7" />
+          <img src="/img/logo.png" alt="Docle" class="w-7 h-7" />
           <span class="text-white">Docle</span>
         </span>
 
