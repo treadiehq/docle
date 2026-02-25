@@ -7,6 +7,7 @@ RUN npm install
 
 COPY . .
 RUN npm run build \
+    && cp -r .output/public .output/server/chunks/public \
     && rm -rf node_modules app server types
 
 ENV HOST=0.0.0.0
