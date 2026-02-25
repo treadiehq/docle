@@ -34,7 +34,7 @@ export default defineNuxtConfig({
         { src: "https://cdn.seline.com/seline.js", async: true, "data-token": "5e87d8a491f281c" },
       ],
       link: [
-        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'icon', type: 'image/png', href: '/favicon.png' },
         { rel: 'canonical', href: 'https://docle.co' },
         { rel: "preconnect", href: "https://fonts.googleapis.com" },
         { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "anonymous" },
