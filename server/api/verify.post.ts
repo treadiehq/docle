@@ -179,7 +179,8 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
           smtp = smtpResult.verdict;
 
           if (smtp === "rejected") notes.push("Mailbox does not exist (SMTP rejected)");
-          if (smtp === "catch-all") notes.push("Server accepts all addresses (catch-all)");
+          if (smtp === "accepted") notes.push("Mail server accepted this address");
+          if (smtp === "catch-all") notes.push("Server accepts all addresses (catch-all) — mailbox may not actually exist");
           if (smtp === "greylisted") notes.push("Server deferred (greylisted/temp block)");
           if (smtp === "error") notes.push("SMTP verification inconclusive");
         }

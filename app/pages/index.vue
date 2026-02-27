@@ -205,8 +205,8 @@ function explain(r: VerifyResult): string {
     if (pgp === true && r.smtp !== "accepted") return `This email is likely valid. A PGP public key has been published for this address, confirming someone actively uses it. The domain ${r.domain} has mail servers configured.${dw}`;
     if (grav === true && r.smtp !== "accepted") return `This email is likely valid. We found an active Gravatar profile linked to this address, which means a real person uses it. The domain ${r.domain} has mail servers configured.${dw}`;
     if (r.smtp !== "accepted" && r.notes?.some((n) => n.includes("Major email provider")))
-      return `This email is on ${r.domain}, a major email provider with active mail servers. The provider blocks direct mailbox verification, but the address is properly formatted and the domain is trusted. Very likely deliverable.${dw}`;
-    return `This email looks good. The domain ${r.domain} has mail servers, and the mail server confirmed this specific mailbox exists and accepts mail. Safe to send.${dw}`;
+      return `This email is on ${r.domain}, a major email provider with active mail servers. The provider blocks direct mailbox verification, but the address is properly formatted and the domain is trusted. Likely deliverable, though we can't confirm the specific mailbox without sending a real email.${dw}`;
+    return `This email looks good. The domain ${r.domain} has mail servers, and the mail server accepted this address. Note: some servers accept all mail during the initial check but bounce later — delivery is very likely but not 100% guaranteed.${dw}`;
   }
   if (r.status === "Invalid") {
     if (!r.domain) return "This doesn't look like a valid email address.";
@@ -219,7 +219,7 @@ function explain(r: VerifyResult): string {
   }
   if (r.status === "Risky") {
     const reasons: string[] = [];
-    if (r.smtp === "catch-all") reasons.push(`the server at ${r.domain} accepts mail for any address — even made-up ones — so we can't confirm this specific mailbox is real`);
+    if (r.smtp === "catch-all") reasons.push(`the server at ${r.domain} accepts mail for any address — even fake ones — so the mailbox may not actually exist and your email could bounce later`);
     if (r.smtp === "greylisted") reasons.push("the server temporarily deferred our check, which may mean it's suspicious of new senders");
     if (r.notes.includes("Role-based address")) reasons.push(`"${r.email.split("@")[0]}@" is a generic role address (like info@, admin@), which tend to have higher bounce rates and stricter spam filtering`);
     if (r.notes.includes("Disposable domain")) reasons.push(`${r.domain} is a known disposable/temporary email provider`);

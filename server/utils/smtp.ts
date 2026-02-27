@@ -59,7 +59,8 @@ function smtpSession(
     let serverSupportsStarttls = false;
     let ehloLines: string[] = [];
 
-    const fakeLocal = `xvrf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Use a highly random fake address to detect catch-all servers
+    const fakeLocal = `xvrf-${Date.now()}-${Math.random().toString(36).slice(2, 10)}-nonexist`;
 
     const finish = (verdict: SmtpVerdict, code: number | null = null) => {
       if (phase === "done") return;

@@ -129,40 +129,41 @@ export function computeConfidence(
 
   switch (smtp) {
     case "accepted":
-      score = 97;
+      score = 85;
       break;
     case "rejected":
       score = 3;
       break;
     case "catch-all":
-      score = 60;
+      score = 45;
       break;
     case "greylisted":
-      score = 45;
+      score = 40;
       break;
     case "error":
     case null:
-      score = providers?.isMajorProvider ? 78 : 40;
+      score = providers?.isMajorProvider ? 65 : 35;
       break;
     default:
       score = 30;
   }
 
-  if (providers?.microsoftExists === true) score = Math.max(score, 95);
+  // Provider-confirmed accounts get a boost but never 100%
+  if (providers?.microsoftExists === true) score = Math.max(score, 93);
   if (providers?.microsoftExists === false) score = Math.min(score, 5);
-  if (providers?.googleExists === true) score = Math.max(score, 96);
+  if (providers?.googleExists === true) score = Math.max(score, 94);
   if (providers?.googleExists === false) score = Math.min(score, 5);
-  if (providers?.appleExists === true) score = Math.max(score, 95);
+  if (providers?.appleExists === true) score = Math.max(score, 93);
   if (providers?.appleExists === false) score = Math.min(score, 5);
-  if (providers?.hasGravatar === true) score = Math.max(score, 85);
-  if (providers?.hasGitHub === true) score = Math.max(score, 90);
-  if (providers?.hasPgpKey === true) score = Math.max(score, 88);
-  if (providers?.hibpBreached === true) score = Math.max(score, 87);
+  if (providers?.hasGravatar === true) score = Math.max(score, 80);
+  if (providers?.hasGitHub === true) score = Math.max(score, 82);
+  if (providers?.hasPgpKey === true) score = Math.max(score, 80);
+  if (providers?.hibpBreached === true) score = Math.max(score, 78);
 
   if (implicitMx && score > 50) score -= 15;
 
   if (domainHealth) {
-    if (domainHealth.hasSPF && domainHealth.hasDMARC) score += 5;
+    if (domainHealth.hasSPF && domainHealth.hasDMARC) score += 3;
     else if (!domainHealth.hasSPF && !domainHealth.hasDMARC) score -= 10;
   }
 
@@ -180,5 +181,5 @@ export function computeConfidence(
     if (flag === "Role-based address") score -= 10;
   }
 
-  return Math.max(0, Math.min(100, score));
+  return Math.max(0, Math.min(97, score));
 }
