@@ -31,6 +31,7 @@ import { checkPgpKey } from "~~/server/utils/pgp-check";
 import { checkGoogleAccount, isGoogleDomain } from "~~/server/utils/google-check";
 import { checkAppleAccount, isAppleDomain } from "~~/server/utils/apple-check";
 import { checkHIBP } from "~~/server/utils/hibp-check";
+import { detectMxProvider } from "~~/server/utils/mx-provider";
 import { getBounceCount } from "~~/server/utils/bounce-db";
 import { recordServerResult, getServerCatchAllRate, isSuspectedCatchAll } from "~~/server/utils/server-intel";
 import { checkDkimSignals, type DkimSignals } from "~~/server/utils/dkim-check";
@@ -221,11 +222,11 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
           if (smtp === "error") notes.push("SMTP verification inconclusive");
         }
 
-        // Detect provider-specific domains
-        const isMsHosted = isMicrosoftDomain(domain) ||
-          mxHosts.some((h) => h.endsWith(".mail.protection.outlook.com"));
-        const isGoogleHosted = isGoogleDomain(domain, mxHosts);
-        const isAppleHosted = isAppleDomain(domain);
+        // Detect provider via MX records (unlocks checks for custom domains)
+        const mxProvider = detectMxProvider(mxHosts);
+        const isMsHosted = isMicrosoftDomain(domain) || mxProvider === "microsoft";
+        const isGoogleHosted = isGoogleDomain(domain, mxHosts) || mxProvider === "google";
+        const isAppleHosted = isAppleDomain(domain) || mxProvider === "apple";
 
         // Provider-specific checks (run when SMTP is inconclusive or for extra confirmation)
         const smtpInconclusive = smtp === "error" || smtp === null;
