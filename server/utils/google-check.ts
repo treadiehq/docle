@@ -28,6 +28,9 @@ export async function checkGoogleAccount(
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastCallTs = Date.now();
 
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  const isConsumer = GOOGLE_CONSUMER_DOMAINS.has(domain);
+
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -59,12 +62,14 @@ export async function checkGoogleAccount(
 
     const text = await response.text();
 
-    // "BadAuthentication" means account exists but credentials are wrong
-    if (text.includes("BadAuthentication")) return true;
-    // "INVALID_EMAIL" or "InvalidSecondFactor" means no such account
+    // Definitive signals (work for both consumer and Workspace)
     if (text.includes("INVALID_EMAIL")) return false;
-    // "NeedsBrowser" means account exists but requires browser auth
     if (text.includes("NeedsBrowser")) return true;
+    // Workspace-specific: device management required = account exists
+    if (text.includes("DeviceManagementRequiredOrSyncDisabled")) return true;
+    // BadAuthentication is definitive for consumer Gmail but ambiguous for Workspace
+    // (Workspace returns this for both real and fake accounts)
+    if (text.includes("BadAuthentication")) return isConsumer ? true : null;
 
     return null;
   } catch {
