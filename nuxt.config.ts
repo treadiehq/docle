@@ -60,5 +60,8 @@ export default defineNuxtConfig({
     rateLimitDailyEmailCap: 500,
     rateLimitMaxConcurrent: 2,
     rateLimitGlobalDailyCap: 50_000,
+    rateLimitAgentRequestsPerMinute: 60,
+    rateLimitAgentDailyEmailCap: 5_000,
+    rateLimitAgentMaxConcurrent: 5,
   },
 });

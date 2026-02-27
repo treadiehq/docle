@@ -14,6 +14,7 @@
     "disposable-email-domains": "^1.0.62",
     "nuxt": "^3.17.7",
     "p-limit": "^6.2.0",
-    "tailwindcss": "^4.2.1"
+    "tailwindcss": "^4.2.1",
+    "vestauth": "^0.21.1"
   }
 }

@@ -20,6 +20,7 @@ import {
   acquireConcurrency,
   releaseConcurrency,
 } from "~~/server/utils/rate-limit";
+import { recordAgentUsage, getAgentUsage } from "~~/server/utils/agent-usage";
 import { checkDomainHealth, type DomainHealth } from "~~/server/utils/domain-health";
 import { detectTypo } from "~~/server/utils/typo";
 import { checkMicrosoftAccount, isMicrosoftDomain } from "~~/server/utils/microsoft-check";
@@ -41,20 +42,27 @@ import type { ProviderSignals, IntelSignals } from "~~/server/utils/email";
 export default defineEventHandler(async (event): Promise<VerifyResponse> => {
   const config = useRuntimeConfig();
 
-  const ip =
+  const agent = event.context.agent as { uid: string } | undefined;
+
+  const rateLimitKey = agent?.uid ? `agent:${agent.uid}` : (
     getRequestHeader(event, "x-forwarded-for")?.split(",")[0]?.trim() ||
     getRequestHeader(event, "x-real-ip") ||
-    "unknown";
+    "unknown"
+  );
 
-  // 1. Per-IP request rate
-  const rateCheck = checkRequestRate(ip, config.rateLimitRequestsPerMinute as number);
+  const reqPerMin = agent ? config.rateLimitAgentRequestsPerMinute as number : config.rateLimitRequestsPerMinute as number;
+  const dailyCap = agent ? config.rateLimitAgentDailyEmailCap as number : config.rateLimitDailyEmailCap as number;
+  const maxConc = agent ? config.rateLimitAgentMaxConcurrent as number : config.rateLimitMaxConcurrent as number;
+
+  // 1. Request rate
+  const rateCheck = checkRequestRate(rateLimitKey, reqPerMin);
   if (!rateCheck.allowed) {
     setResponseHeader(event, "Retry-After", String(Math.ceil((rateCheck.retryAfterMs ?? 60_000) / 1000)));
     throw createError({ statusCode: 429, statusMessage: rateCheck.reason });
   }
 
   // 2. Concurrency guard
-  const concCheck = acquireConcurrency(ip, config.rateLimitMaxConcurrent as number);
+  const concCheck = acquireConcurrency(rateLimitKey, maxConc);
   if (!concCheck.allowed) {
     throw createError({ statusCode: 429, statusMessage: concCheck.reason });
   }
@@ -72,8 +80,8 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     });
   }
 
-  // 3. Per-IP daily email cap
-  const dailyCheck = checkDailyEmailCap(ip, body.emails.length, config.rateLimitDailyEmailCap as number);
+  // 3. Daily email cap (per agent UID or per IP)
+  const dailyCheck = checkDailyEmailCap(rateLimitKey, body.emails.length, dailyCap);
   if (!dailyCheck.allowed) {
     setResponseHeader(event, "Retry-After", String(Math.ceil((dailyCheck.retryAfterMs ?? 86_400_000) / 1000)));
     throw createError({ statusCode: 429, statusMessage: dailyCheck.reason });
@@ -389,12 +397,29 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     }),
   );
 
-  recordEmailsUsed(ip, results.length);
+  recordEmailsUsed(rateLimitKey, results.length);
   recordGlobalEmails(results.length);
+
+  if (agent?.uid) {
+    recordAgentUsage(agent.uid, results.length);
+    const usage = getAgentUsage(agent.uid);
+    return {
+      results,
+      agent: {
+        uid: agent.uid,
+        usage: {
+          emailsVerified: usage.emailsVerified,
+          requests: usage.requests,
+          dailyLimit: dailyCap,
+          remaining: Math.max(0, dailyCap - usage.emailsVerified),
+        },
+      },
+    };
+  }
 
   return { results };
 
   } finally {
-    releaseConcurrency(ip);
+    releaseConcurrency(rateLimitKey);
   }
 });
