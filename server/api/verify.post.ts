@@ -215,40 +215,40 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
 
         if (msResult && !msResult.throttled) {
           providerChecks.microsoft = msResult.exists;
-          if (msResult.exists === true) notes.push("Microsoft account confirmed to exist");
-          if (msResult.exists === false) notes.push("Microsoft account does not exist");
+          if (msResult.exists === true) notes.push("Account verified with provider");
+          if (msResult.exists === false) notes.push("Account not found at provider");
         }
 
         if (googleResult !== null) {
           providerChecks.google = googleResult;
-          if (googleResult === true) notes.push("Google account confirmed to exist");
-          if (googleResult === false) notes.push("Google account does not exist");
+          if (googleResult === true) notes.push("Account verified with provider");
+          if (googleResult === false) notes.push("Account not found at provider");
         }
 
         if (appleResult !== null) {
           providerChecks.apple = appleResult;
-          if (appleResult === true) notes.push("Apple ID confirmed to exist");
-          if (appleResult === false) notes.push("Apple ID does not exist");
+          if (appleResult === true) notes.push("Account verified with provider");
+          if (appleResult === false) notes.push("Account not found at provider");
         }
 
         if (gravatarResult !== null) {
           providerChecks.gravatar = gravatarResult;
-          if (gravatarResult === true) notes.push("Gravatar profile found (email is in active use)");
+          if (gravatarResult === true) notes.push("Public profile found for this email");
         }
 
         if (githubResult !== null) {
           providerChecks.github = githubResult;
-          if (githubResult === true) notes.push("GitHub profile found with this email");
+          if (githubResult === true) notes.push("Public activity found for this email");
         }
 
         if (pgpResult !== null) {
           providerChecks.pgp = pgpResult;
-          if (pgpResult === true) notes.push("PGP public key published for this email");
+          if (pgpResult === true) notes.push("Public key found for this email");
         }
 
         if (hibpResult !== null) {
           providerChecks.hibp = hibpResult.breached;
-          if (hibpResult.breached) notes.push(`Email found in ${hibpResult.breachCount} data breach${hibpResult.breachCount > 1 ? "es" : ""} (confirms real address)`);
+          if (hibpResult.breached) notes.push("Email found in known data breaches (confirms real address)");
         }
 
         if (domain && isMajorProvider(domain) && (smtp === "error" || smtp === null)

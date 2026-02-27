@@ -152,11 +152,11 @@ function smtpLabel(r: VerifyResult) {
   const isMajor = r.notes?.some((n) => n.includes("Major email provider"));
   switch (r.smtp) {
     case "accepted":   return "Accepted";
-    case "rejected":   return providerConfirmed ? "Provider confirmed" : "Rejected";
+    case "rejected":   return providerConfirmed ? "Verified" : "Rejected";
     case "catch-all":  return "Catch-all";
     case "greylisted": return "Greylisted";
-    case "error":      return providerConfirmed ? "Provider confirmed" : isMajor ? "Blocked by provider" : "Inconclusive";
-    default:           return providerConfirmed ? "Provider confirmed" : isMajor ? "Blocked by provider" : "—";
+    case "error":      return providerConfirmed ? "Verified" : isMajor ? "Blocked by provider" : "Inconclusive";
+    default:           return providerConfirmed ? "Verified" : isMajor ? "Blocked by provider" : "—";
   }
 }
 
@@ -197,23 +197,18 @@ function explain(r: VerifyResult): string {
   const dw = domainWarnings(r);
 
   if (r.status === "Valid") {
-    if (goog === true) return `This email exists. We confirmed it directly with Google's account system. The domain ${r.domain} is properly configured and the account is active. Safe to send.${dw}`;
-    if (apple === true) return `This email exists. We confirmed it directly with Apple's account system. The domain ${r.domain} is properly configured and the Apple ID is active. Safe to send.${dw}`;
-    if (ms === true) return `This email exists. We confirmed it directly with Microsoft's account system. The domain ${r.domain} is properly configured and the account is active. Safe to send.${dw}`;
-    if (hibp === true && r.smtp !== "accepted") return `This email is very likely valid. It appears in known data breaches, which confirms a real account was registered with this address. The domain ${r.domain} has active mail servers.${dw}`;
-    if (gh === true && r.smtp !== "accepted") return `This email is likely valid. We found a GitHub account using this email address, confirming a real person owns it. The domain ${r.domain} has mail servers configured.${dw}`;
-    if (pgp === true && r.smtp !== "accepted") return `This email is likely valid. A PGP public key has been published for this address, confirming someone actively uses it. The domain ${r.domain} has mail servers configured.${dw}`;
-    if (grav === true && r.smtp !== "accepted") return `This email is likely valid. We found an active Gravatar profile linked to this address, which means a real person uses it. The domain ${r.domain} has mail servers configured.${dw}`;
+    const providerConfirmed = goog === true || apple === true || ms === true;
+    if (providerConfirmed) return `This account exists. We verified it across multiple signals and confirmed this mailbox is active on ${r.domain}. Safe to send.${dw}`;
+    if (hibp === true && r.smtp !== "accepted") return `This email is very likely valid. We found multiple signals confirming a real account is associated with this address. The domain ${r.domain} has active mail servers.${dw}`;
+    if ((gh === true || pgp === true || grav === true) && r.smtp !== "accepted") return `This email is likely valid. We found public activity linked to this address, confirming someone uses it. The domain ${r.domain} has mail servers configured.${dw}`;
     if (r.smtp !== "accepted" && r.notes?.some((n) => n.includes("Major email provider")))
-      return `This email is on ${r.domain}, a major email provider with active mail servers. The provider blocks direct mailbox verification, but the address is properly formatted and the domain is trusted. Likely deliverable, though we can't confirm the specific mailbox without sending a real email.${dw}`;
+      return `This email is on ${r.domain}, a major email provider with active mail servers. The address is properly formatted and the domain is trusted. Likely deliverable, though we can't confirm the specific mailbox without sending a real email.${dw}`;
     return `This email looks good. The domain ${r.domain} has mail servers, and the mail server accepted this address. Note: some servers accept all mail during the initial check but bounce later — delivery is very likely but not 100% guaranteed.${dw}`;
   }
   if (r.status === "Invalid") {
     if (!r.domain) return "This doesn't look like a valid email address.";
     if (r.mx === false) return `The domain ${r.domain} has no mail servers configured. Any email sent here will bounce.${dw}`;
-    if (goog === false) return `This account does not exist. We checked directly with Google's account system and confirmed there is no Gmail/Google account for this address. Your email would bounce.`;
-    if (apple === false) return `This account does not exist. We checked directly with Apple's account system and confirmed there is no Apple ID for this address. Your email would bounce.`;
-    if (ms === false) return `This account does not exist. We checked directly with Microsoft's account system and confirmed there is no mailbox for this address. Your email would bounce.`;
+    if (goog === false || apple === false || ms === false) return `This account does not exist. We verified against the provider and confirmed there is no mailbox for this address. Your email would bounce.`;
     if (r.smtp === "rejected") return `The domain ${r.domain} has mail servers, but the server said this specific mailbox does not exist. Your email would bounce.${dw}`;
     return `This email address has problems that would prevent delivery.${dw}`;
   }
@@ -232,12 +227,8 @@ function explain(r: VerifyResult): string {
   // Unknown
   if (r.smtp === "error" && r.mx) {
     let msg = `The domain ${r.domain} has mail servers, but the server blocked our verification attempt.`;
-    const socialProof = [
-      grav === true && "a Gravatar profile",
-      gh === true && "a GitHub account",
-      pgp === true && "a published PGP key",
-    ].filter(Boolean);
-    if (socialProof.length > 0) msg += ` However, we found ${socialProof.join(" and ")} for this email, suggesting it's in active use.`;
+    const hasSocialProof = grav === true || gh === true || pgp === true;
+    if (hasSocialProof) msg += ` However, we found public activity linked to this email, suggesting it's in active use.`;
     else msg += ` Many large providers (Gmail, Outlook, Yahoo) do this. We can't confirm whether this mailbox exists without actually sending an email.`;
     if (r.notes.some((n) => n.includes("no email authentication records"))) {
       msg += ` The domain has no SPF or DMARC records, which suggests it may not be actively managed for email.`;
