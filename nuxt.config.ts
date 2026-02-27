@@ -53,6 +53,8 @@ export default defineNuxtConfig({
     dnsTimeoutMs: 5_000,
     dnsConcurrency: 20,
     smtpTimeoutMs: 10_000,
+    smtpHeloDomain: "verify.docle.co",
+    smtpMailFrom: "probe@verify.docle.co",
     hibpApiKey: "",
     rateLimitRequestsPerMinute: 10,
     rateLimitDailyEmailCap: 500,

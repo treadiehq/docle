@@ -31,6 +31,9 @@ import { checkPgpKey } from "~~/server/utils/pgp-check";
 import { checkGoogleAccount, isGoogleDomain } from "~~/server/utils/google-check";
 import { checkAppleAccount, isAppleDomain } from "~~/server/utils/apple-check";
 import { checkHIBP } from "~~/server/utils/hibp-check";
+import { getBounceCount } from "~~/server/utils/bounce-db";
+import { recordServerResult, getServerCatchAllRate, isSuspectedCatchAll } from "~~/server/utils/server-intel";
+import { checkDkimSignals, type DkimSignals } from "~~/server/utils/dkim-check";
 import type { ProviderChecks, DomainIntelSummary } from "~~/types/verify";
 import type { ProviderSignals, IntelSignals } from "~~/server/utils/email";
 
@@ -88,6 +91,7 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
   const domainMxMap = new Map<string, Promise<MxLookupResult | null>>();
   const domainHealthMap = new Map<string, Promise<DomainHealth>>();
   const domainIntelMap = new Map<string, Promise<DomainIntel>>();
+  const domainDkimMap = new Map<string, Promise<DkimSignals>>();
 
   function getMx(domain: string): Promise<MxLookupResult | null> {
     let pending = domainMxMap.get(domain);
@@ -124,6 +128,15 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     return pending;
   }
 
+  function getDkim(domain: string): Promise<DkimSignals> {
+    let pending = domainDkimMap.get(domain);
+    if (!pending) {
+      pending = limit(() => checkDkimSignals(domain, config.dnsTimeoutMs as number));
+      domainDkimMap.set(domain, pending);
+    }
+    return pending;
+  }
+
   // Pre-parse emails for bulk anomaly detection
   const parsedEmails = emailsToProcess.map((raw) => {
     const email = normalizeEmail(raw);
@@ -146,7 +159,10 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
       let mxHosts: string[] = [];
       let implicitMx = false;
       let smtp: VerifyResult["smtp"] = null;
+      let smtpHost = "";
+      let smtpTimingDelta: number | null = null;
       let domainHealth: DomainHealth | undefined;
+      let dkimSignals: DkimSignals | undefined;
       const providerChecks: ProviderChecks = {};
       const notes: string[] = [];
 
@@ -174,13 +190,33 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
 
         if (mx && mxHosts.length > 0) {
           const smtpResult = await limit(() =>
-            verifySmtp(email, domain, mxHosts, smtpTimeoutMs),
+            verifySmtp(email, domain, mxHosts, smtpTimeoutMs,
+              config.smtpHeloDomain as string, config.smtpMailFrom as string),
           );
           smtp = smtpResult.verdict;
+          smtpHost = smtpResult.host;
+
+          // Compute timing delta for side-channel analysis
+          if (smtpResult.realLatencyMs != null && smtpResult.fakeLatencyMs != null) {
+            smtpTimingDelta = smtpResult.realLatencyMs - smtpResult.fakeLatencyMs;
+          }
+
+          // Record result in server behavior database
+          if (smtpHost) {
+            recordServerResult(smtpHost, smtp);
+          }
+
+          // Check server behavior database for suspected catch-all override
+          if (smtp === "accepted" && smtpHost && isSuspectedCatchAll(smtpHost)) {
+            smtp = "catch-all";
+            notes.push("Server historically accepts all addresses (suspected catch-all)");
+          }
 
           if (smtp === "rejected") notes.push("Mailbox does not exist (SMTP rejected)");
           if (smtp === "accepted") notes.push("Mail server accepted this address");
-          if (smtp === "catch-all") notes.push("Server accepts all addresses (catch-all) — mailbox may not actually exist");
+          if (smtp === "catch-all" && !notes.some((n) => n.includes("historically"))) {
+            notes.push("Server accepts all addresses (catch-all) — mailbox may not actually exist");
+          }
           if (smtp === "greylisted") notes.push("Server deferred (greylisted/temp block)");
           if (smtp === "error") notes.push("SMTP verification inconclusive");
         }
@@ -261,11 +297,14 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
         }
       }
 
-      // Domain intelligence (website, age, blacklists)
+      // Domain intelligence (website, age, blacklists) + DKIM
       let domainIntelResult: DomainIntel | undefined;
       let domainIntel: DomainIntelSummary | undefined;
       if (syntaxOk && domain && mx) {
-        domainIntelResult = await getIntel(domain, mxHosts);
+        [domainIntelResult, dkimSignals] = await Promise.all([
+          getIntel(domain, mxHosts),
+          getDkim(domain),
+        ]);
         domainIntel = {
           websiteAlive: domainIntelResult.websiteAlive,
           isParked: domainIntelResult.isParked,
@@ -281,6 +320,9 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
         if (domainIntelResult.blacklisted) {
           notes.push(`Mail server blacklisted (${domainIntelResult.blacklistHits.join(", ")})`);
         }
+
+        if (dkimSignals?.hasDkim) notes.push("DKIM email signing configured");
+        if (dkimSignals?.hasMtaSts) notes.push("MTA-STS policy active");
       }
 
       // Local part pattern analysis
@@ -318,6 +360,12 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
         isMajorProvider: domain ? isMajorProvider(domain) : false,
       };
 
+      // Bounce intelligence from community reports
+      const bounceInfo = syntaxOk ? getBounceCount(email) : { totalReports: 0, uniqueReporters: 0 };
+      if (bounceInfo.uniqueReporters >= 2) {
+        notes.push(`Previously reported as bouncing by ${bounceInfo.uniqueReporters} users`);
+      }
+
       const intel: IntelSignals = {
         websiteAlive: domainIntelResult?.websiteAlive,
         isParked: domainIntelResult?.isParked,
@@ -325,6 +373,12 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
         blacklisted: domainIntelResult?.blacklisted,
         looksHuman: pattern?.looksHuman,
         patternFlags: pattern?.flags,
+        smtpTimingDeltaMs: smtpTimingDelta,
+        bounceReports: bounceInfo.uniqueReporters,
+        serverCatchAllRate: smtpHost ? getServerCatchAllRate(smtpHost) : null,
+        hasDkim: dkimSignals?.hasDkim,
+        hasMtaSts: dkimSignals?.hasMtaSts,
+        hasBimi: dkimSignals?.hasBimi,
       };
 
       const status = computeStatus(syntaxOk, domain || null, mx, smtp, riskFlags, providers);

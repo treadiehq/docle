@@ -7,6 +7,9 @@ export interface SmtpResult {
   verdict: SmtpVerdict;
   code: number | null;
   banner: string;
+  host: string;
+  realLatencyMs: number | null;
+  fakeLatencyMs: number | null;
 }
 
 const USER_UNKNOWN_PATTERNS = [
@@ -47,6 +50,8 @@ function smtpSession(
   email: string,
   domain: string,
   timeoutMs: number,
+  heloDomain: string = "verify.local",
+  mailFrom: string = "noreply@verify.local",
 ): Promise<SmtpResult> {
   return new Promise((resolve) => {
     let sock: Socket | TLSSocket = new Socket();
@@ -58,6 +63,10 @@ function smtpSession(
     let fakeCode: number | null = null;
     let serverSupportsStarttls = false;
     let ehloLines: string[] = [];
+    let rcptRealSentAt = 0;
+    let rcptRealLatencyMs: number | null = null;
+    let rcptFakeSentAt = 0;
+    let rcptFakeLatencyMs: number | null = null;
 
     // Use a highly random fake address to detect catch-all servers
     const fakeLocal = `xvrf-${Date.now()}-${Math.random().toString(36).slice(2, 10)}-nonexist`;
@@ -67,7 +76,7 @@ function smtpSession(
       phase = "done";
       clearTimeout(timer);
       sock.destroy();
-      resolve({ verdict, code, banner: bannerText });
+      resolve({ verdict, code, banner: bannerText, host, realLatencyMs: rcptRealLatencyMs, fakeLatencyMs: rcptFakeLatencyMs });
     };
 
     const timer = setTimeout(() => finish("error"), timeoutMs);
@@ -102,7 +111,7 @@ function smtpSession(
           if (code !== 220) { finish("error", code); return; }
           phase = "ehlo";
           ehloLines = [];
-          sock.write("EHLO verify.local\r\n");
+          sock.write(`EHLO ${heloDomain}\r\n`);
           break;
 
         case "ehlo":
@@ -112,14 +121,14 @@ function smtpSession(
             sock.write("STARTTLS\r\n");
           } else {
             phase = "mail";
-            sock.write("MAIL FROM:<noreply@verify.local>\r\n");
+            sock.write(`MAIL FROM:<${mailFrom}>\r\n`);
           }
           break;
 
         case "starttls":
           if (code !== 220) {
             phase = "mail";
-            sock.write("MAIL FROM:<noreply@verify.local>\r\n");
+            sock.write(`MAIL FROM:<${mailFrom}>\r\n`);
             return;
           }
           upgradeToTls();
@@ -128,23 +137,27 @@ function smtpSession(
         case "ehlo2":
           if (code !== 250) { finish("error", code); return; }
           phase = "mail";
-          sock.write("MAIL FROM:<noreply@verify.local>\r\n");
+          sock.write(`MAIL FROM:<${mailFrom}>\r\n`);
           break;
 
         case "mail":
           if (code < 200 || code >= 300) { finish("error", code); return; }
           phase = "rcpt-real";
+          rcptRealSentAt = Date.now();
           sock.write(`RCPT TO:<${email}>\r\n`);
           break;
 
         case "rcpt-real":
+          rcptRealLatencyMs = Date.now() - rcptRealSentAt;
           realCode = code;
           realLine = line;
           phase = "rcpt-fake";
+          rcptFakeSentAt = Date.now();
           sock.write(`RCPT TO:<${fakeLocal}@${domain}>\r\n`);
           break;
 
         case "rcpt-fake":
+          rcptFakeLatencyMs = Date.now() - rcptFakeSentAt;
           fakeCode = code;
           phase = "quit";
           sock.write("QUIT\r\n");
@@ -176,7 +189,7 @@ function smtpSession(
         ehloLines = [];
         serverSupportsStarttls = false;
         buf = "";
-        tlsSock.write("EHLO verify.local\r\n");
+        tlsSock.write(`EHLO ${heloDomain}\r\n`);
       });
 
       tlsSock.on("data", onData);
@@ -215,6 +228,15 @@ function smtpSession(
         return;
       }
       if (realOk && fakeOk) {
+        // Timing side-channel: if real lookup took significantly longer
+        // than fake, the server actually queried its user database
+        if (rcptRealLatencyMs !== null && rcptFakeLatencyMs !== null) {
+          const delta = rcptRealLatencyMs - rcptFakeLatencyMs;
+          if (delta > 50) {
+            finish("accepted", realCode);
+            return;
+          }
+        }
         finish("catch-all", realCode);
         return;
       }
@@ -244,13 +266,15 @@ export async function verifySmtp(
   domain: string,
   mxHosts: string[],
   timeoutMs: number,
+  heloDomain?: string,
+  mailFrom?: string,
 ): Promise<SmtpResult> {
   for (const host of mxHosts.slice(0, 2)) {
     try {
-      const result = await smtpSession(host, 25, email, domain, timeoutMs);
+      const result = await smtpSession(host, 25, email, domain, timeoutMs, heloDomain, mailFrom);
       if (result.verdict === "greylisted") {
         await new Promise((r) => setTimeout(r, GREYLIST_RETRY_DELAY_MS));
-        const retry = await smtpSession(host, 25, email, domain, timeoutMs);
+        const retry = await smtpSession(host, 25, email, domain, timeoutMs, heloDomain, mailFrom);
         if (retry.verdict !== "error" && retry.verdict !== "greylisted") return retry;
         return result;
       }
@@ -259,5 +283,5 @@ export async function verifySmtp(
       continue;
     }
   }
-  return { verdict: "error", code: null, banner: "" };
+  return { verdict: "error", code: null, banner: "", host: "", realLatencyMs: null, fakeLatencyMs: null };
 }

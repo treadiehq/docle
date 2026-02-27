@@ -71,6 +71,12 @@ export interface IntelSignals {
   blacklisted?: boolean | null;
   looksHuman?: boolean;
   patternFlags?: string[];
+  smtpTimingDeltaMs?: number | null;
+  bounceReports?: number;
+  serverCatchAllRate?: number | null;
+  hasDkim?: boolean;
+  hasMtaSts?: boolean;
+  hasBimi?: boolean;
 }
 
 export function computeStatus(
@@ -174,6 +180,18 @@ export function computeConfidence(
     if (intel.domainAgeDays != null && intel.domainAgeDays < 30) score -= 15;
     if (intel.looksHuman === false) score -= 10;
     if (intel.patternFlags && intel.patternFlags.length > 0) score -= 5;
+    // Timing side-channel: positive delta = server did a real lookup
+    if (intel.smtpTimingDeltaMs != null && intel.smtpTimingDeltaMs > 50) score += 3;
+    if (intel.smtpTimingDeltaMs != null && intel.smtpTimingDeltaMs < 5 && smtp === "accepted") score -= 3;
+    // Bounce reports from other users
+    if (intel.bounceReports != null && intel.bounceReports >= 2) score -= 20;
+    if (intel.bounceReports != null && intel.bounceReports >= 5) score = Math.min(score, 20);
+    // Server behavior database
+    if (intel.serverCatchAllRate != null && intel.serverCatchAllRate > 0.9) score -= 15;
+    // DKIM / MTA-STS / BIMI signals
+    if (intel.hasDkim) score += 3;
+    if (intel.hasMtaSts) score += 2;
+    if (intel.hasBimi) score += 1;
   }
 
   for (const flag of riskFlags) {

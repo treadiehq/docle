@@ -47,6 +47,7 @@ function stopStepCycle() {
 async function verifySingle() {
   singleError.value = "";
   singleResult.value = null;
+  bounceReported.value = false;
   const email = singleEmail.value.trim();
   if (!email) return;
   singleLoading.value = true;
@@ -62,6 +63,22 @@ async function verifySingle() {
   } finally {
     stopStepCycle();
     singleLoading.value = false;
+  }
+}
+
+// --- Bounce reporting ---
+const bounceReported = ref(false);
+const bounceReporting = ref(false);
+
+async function reportBounce(email: string) {
+  bounceReporting.value = true;
+  try {
+    await $fetch("/api/report-bounce", { method: "POST", body: { email } });
+    bounceReported.value = true;
+  } catch {
+    // silently fail
+  } finally {
+    bounceReporting.value = false;
   }
 }
 
@@ -215,12 +232,14 @@ function explain(r: VerifyResult): string {
   if (r.status === "Risky") {
     const reasons: string[] = [];
     if (r.smtp === "catch-all") reasons.push(`the server at ${r.domain} accepts mail for any address — even fake ones — so the mailbox may not actually exist and your email could bounce later`);
+    if (r.notes.some((n) => n.includes("historically accepts"))) reasons.push("this server has a pattern of accepting all addresses across many checks");
     if (r.smtp === "greylisted") reasons.push("the server temporarily deferred our check, which may mean it's suspicious of new senders");
     if (r.notes.includes("Role-based address")) reasons.push(`"${r.email.split("@")[0]}@" is a generic role address (like info@, admin@), which tend to have higher bounce rates and stricter spam filtering`);
     if (r.notes.includes("Disposable domain")) reasons.push(`${r.domain} is a known disposable/temporary email provider`);
     if (r.domainIntel?.isParked) reasons.push("the domain appears to be parked or for sale");
     if (r.domainIntel?.blacklisted) reasons.push("the mail server is on a spam blacklist");
     if (r.notes.some((n) => n.includes("Looks auto-generated"))) reasons.push("the local part looks auto-generated rather than a real person's name");
+    if (r.notes.some((n) => n.includes("reported as bouncing"))) reasons.push("other users have reported this address as bouncing");
     if (reasons.length === 0) return "This email has some risk factors. Sending may work but isn't guaranteed.";
     return `This email is risky because ${reasons.join(", and ")}.`;
   }
@@ -248,11 +267,11 @@ function toggleRow(idx: number) {
 
 const features = [
   { num: "01", title: "MX Record Lookup", desc: "Resolves the domain's mail servers to confirm email infrastructure exists." },
-  { num: "02", title: "Mailbox Verification", desc: "Connects via SMTP to check whether the specific mailbox accepts mail." },
-  { num: "03", title: "Catch-all Detection", desc: "Identifies servers that accept any address, so you know when results are uncertain." },
-  { num: "04", title: "Disposable Domains", desc: "Flags temporary email providers like Guerrilla Mail and Mailinator." },
-  { num: "05", title: "Role Address Flags", desc: "Detects generic prefixes like info@, admin@, and support@ that often bounce." },
-  { num: "06", title: "Bulk Processing", desc: "Verify up to 10,000 emails at once with parallel processing and CSV export." },
+  { num: "02", title: "Mailbox Verification", desc: "Connects via SMTP to check whether the specific mailbox accepts mail, with STARTTLS and timing analysis." },
+  { num: "03", title: "Catch-all Detection", desc: "Uses multi-probe testing, response timing analysis, and server behavior history to identify catch-all servers." },
+  { num: "04", title: "Domain Intelligence", desc: "Checks DKIM signing, MTA-STS, BIMI, SPF/DMARC, domain age, website liveness, and spam blacklists." },
+  { num: "05", title: "Bounce Intelligence", desc: "Community-powered bounce reporting helps flag addresses that pass SMTP but bounce in practice." },
+  { num: "06", title: "Bulk Processing", desc: "Verify up to 500 emails at once with parallel processing and CSV export." },
 ];
 
 const faqItems = [
@@ -427,6 +446,18 @@ function toggleFaq(idx: number) {
                   <p class="text-xs leading-relaxed text-muted">
                     {{ explain(singleResult) }}
                   </p>
+
+                  <div v-if="singleResult.status === 'Valid' || singleResult.status === 'Risky'" class="flex items-center gap-2 pt-1">
+                    <button
+                      v-if="!bounceReported"
+                      :disabled="bounceReporting"
+                      class="text-xs text-dim transition hover:text-muted"
+                      @click="reportBounce(singleResult.email)"
+                    >
+                      {{ bounceReporting ? "Reporting…" : "Did this email bounce? Let us know →" }}
+                    </button>
+                    <span v-else class="text-xs text-dim">Thanks — your report helps improve accuracy for everyone.</span>
+                  </div>
                 </div>
               </div>
             </div>
