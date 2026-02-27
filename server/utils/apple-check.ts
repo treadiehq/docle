@@ -1,6 +1,8 @@
 /**
  * Check if an Apple ID exists for an email (iCloud, me.com, mac.com).
- * Uses Apple's public auth endpoint — same as the Sign In with Apple flow.
+ * Uses Apple's federate auth endpoint — the first step of Sign In with Apple.
+ * A real account returns { hasSWP: true, primaryAuthOptions: ["SWP"] }.
+ * A non-existent account returns only { federated: false } with no hasSWP field.
  * Returns true if account exists, false if not, null on error/rate-limit.
  */
 
@@ -32,73 +34,45 @@ export async function checkAppleAccount(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch("https://appleid.apple.com/auth/verify/trusteddevice", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Apple-Widget-Key": APPLE_WIDGET_KEY,
-        "X-Apple-OAuth-Client-Id": APPLE_WIDGET_KEY,
-        "X-Apple-OAuth-Client-Type": "firstPartyAuth",
-        "X-Apple-OAuth-Redirect-URI": "https://appleid.apple.com",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-        Origin: "https://appleid.apple.com",
-        Referer: "https://appleid.apple.com/",
+    const response = await fetch(
+      "https://appleid.apple.com/appleauth/auth/federate?isRememberMeEnabled=true",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-Apple-Widget-Key": APPLE_WIDGET_KEY,
+          "X-Apple-OAuth-Client-Id": APPLE_WIDGET_KEY,
+          "X-Apple-OAuth-Client-Type": "firstPartyAuth",
+          "X-Apple-OAuth-Redirect-URI": "https://appleid.apple.com",
+          "X-Apple-OAuth-Response-Mode": "web_message",
+          "X-Apple-OAuth-Response-Type": "code",
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Origin: "https://appleid.apple.com",
+          Referer: "https://appleid.apple.com/",
+        },
+        body: JSON.stringify({ accountName: email, rememberMe: true }),
+        signal: controller.signal,
       },
-      body: JSON.stringify({
-        accountName: email,
-        rememberMe: false,
-      }),
-      signal: controller.signal,
-    });
+    );
 
     clearTimeout(timer);
 
-    // 200/409 = account exists (auth challenge returned)
-    // 400 with specific error = account doesn't exist
-    // 403 = rate limited or blocked
-    if (response.status === 409 || response.status === 200) return true;
     if (response.status === 403 || response.status === 429) return null;
 
-    if (response.status === 400 || response.status === 404) {
+    if (response.status === 200) {
       try {
-        const data = await response.json();
-        const code = data?.serviceErrors?.[0]?.code;
-        if (code === "-20101" || code === "-20209") return false;
-      } catch { /* ignore parse errors */ }
-      return false;
+        const data = await response.json() as Record<string, unknown>;
+        // Real accounts have hasSWP: true and primaryAuthOptions
+        if (data.hasSWP === true) return true;
+        // No hasSWP means account doesn't exist
+        return false;
+      } catch {
+        return null;
+      }
     }
 
-    // Fallback: try the iForgot endpoint as secondary check
-    return await checkViaIforgot(email, timeoutMs);
-  } catch {
-    return null;
-  }
-}
-
-async function checkViaIforgot(
-  email: string,
-  timeoutMs: number,
-): Promise<boolean | null> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    const response = await fetch("https://iforgot.apple.com/password/verify/appleid", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-      },
-      body: JSON.stringify({ id: email }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timer);
-
-    if (response.status === 200) return true;
-    if (response.status === 404) return false;
     return null;
   } catch {
     return null;
