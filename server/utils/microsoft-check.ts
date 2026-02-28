@@ -39,6 +39,7 @@ const MICROSOFT_CONSUMER_DOMAINS = new Set([
 
 let lastCallTs = 0;
 const MIN_INTERVAL_MS = 500;
+let queue: Promise<unknown> = Promise.resolve();
 
 export function isMicrosoftDomain(domain: string): boolean {
   return MICROSOFT_CONSUMER_DOMAINS.has(domain);
@@ -49,21 +50,21 @@ export function isMicrosoftDomain(domain: string): boolean {
  * Works for consumer Outlook/Hotmail/Live domains and Microsoft 365 tenants.
  * Rate-limited to max 2 requests/second to avoid throttling.
  */
-export async function checkMicrosoftAccount(
+export function checkMicrosoftAccount(
   email: string,
   timeoutMs: number = 5_000,
 ): Promise<MicrosoftCheckResult> {
-  const now = Date.now();
-  const wait = MIN_INTERVAL_MS - (now - lastCallTs);
-  if (wait > 0) {
-    await new Promise((r) => setTimeout(r, wait));
-  }
-  lastCallTs = Date.now();
+  const p = queue.then(async (): Promise<MicrosoftCheckResult> => {
+    const now = Date.now();
+    const wait = MIN_INTERVAL_MS - (now - lastCallTs);
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    lastCallTs = Date.now();
 
-  try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
     const response = await fetch(MS_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -82,8 +83,6 @@ export async function checkMicrosoftAccount(
       signal: controller.signal,
     });
 
-    clearTimeout(timer);
-
     if (response.status === 429) {
       return { exists: null, isManaged: false, throttled: true };
     }
@@ -94,7 +93,6 @@ export async function checkMicrosoftAccount(
 
     const data = await response.json();
 
-    // IfExistsResult: 0 = exists, 1 = doesn't exist, 5/6 = exists on different IdP
     const ifExists: number | undefined = data?.IfExistsResult;
     const isManaged: boolean = data?.EstsProperties?.DomainType === 3;
 
@@ -108,5 +106,10 @@ export async function checkMicrosoftAccount(
     return { exists: null, isManaged, throttled: false };
   } catch {
     return { exists: null, isManaged: false, throttled: false };
+  } finally {
+    clearTimeout(timer);
   }
+  });
+  queue = p.catch(() => {});
+  return p;
 }

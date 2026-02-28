@@ -22,13 +22,15 @@ export async function lookupMx(
   const cached = cache.get(domain);
   if (cached && cached.expiresAt > now) return cached.result;
 
-  const withTimeout = <T>(p: Promise<T>): Promise<T> =>
-    Promise.race([
-      p,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("DNS timeout")), timeoutMs),
-      ),
+  const withTimeout = <T>(p: Promise<T>): Promise<T> => {
+    let timeoutId: NodeJS.Timeout;
+    return Promise.race([
+      p.finally(() => clearTimeout(timeoutId)),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("DNS timeout")), timeoutMs);
+      }),
     ]);
+  };
 
   try {
     const records = await withTimeout(resolveMx(domain));
@@ -92,3 +94,5 @@ export function clearExpiredCache(): void {
     if (entry.expiresAt <= now) cache.delete(key);
   }
 }
+
+setInterval(clearExpiredCache, 60_000).unref();

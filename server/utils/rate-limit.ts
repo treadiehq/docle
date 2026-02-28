@@ -77,7 +77,7 @@ export function checkRequestRate(ip: string, maxPerMinute: number): RateLimitRes
 }
 
 /**
- * Check per-IP daily email cap. Call BEFORE processing.
+ * Check per-IP daily email cap and reserve capacity atomically.
  * Returns how many emails are allowed from the requested count.
  */
 export function checkDailyEmailCap(ip: string, requestedCount: number, dailyCap: number): RateLimitResult & { allowedCount: number } {
@@ -94,19 +94,12 @@ export function checkDailyEmailCap(ip: string, requestedCount: number, dailyCap:
   }
 
   const allowedCount = Math.min(requestedCount, remaining);
+  bucket.emailCount += allowedCount;
   return { allowed: true, allowedCount };
 }
 
 /**
- * Record emails consumed against daily cap. Call AFTER processing.
- */
-export function recordEmailsUsed(ip: string, count: number): void {
-  const bucket = getDailyBucket(ip);
-  bucket.emailCount += count;
-}
-
-/**
- * Check global daily email ceiling across all IPs.
+ * Check global daily email ceiling across all IPs and reserve capacity atomically.
  */
 export function checkGlobalCap(requestedCount: number, globalCap: number): RateLimitResult {
   const now = Date.now();
@@ -123,14 +116,8 @@ export function checkGlobalCap(requestedCount: number, globalCap: number): RateL
     };
   }
 
+  globalDailyEmails += requestedCount;
   return { allowed: true };
-}
-
-/**
- * Record global email usage.
- */
-export function recordGlobalEmails(count: number): void {
-  globalDailyEmails += count;
 }
 
 /**

@@ -12,23 +12,26 @@
 
 let lastCallTs = 0;
 const MIN_INTERVAL_MS = 1_600;
+let queue: Promise<unknown> = Promise.resolve();
 
-export async function checkHIBP(
+type HibpResult = { breached: boolean; breachCount: number } | null;
+
+export function checkHIBP(
   email: string,
   apiKey: string | undefined,
   timeoutMs: number = 5_000,
-): Promise<{ breached: boolean; breachCount: number } | null> {
-  if (!apiKey) return null;
+): Promise<HibpResult> {
+  if (!apiKey) return Promise.resolve(null);
 
-  const now = Date.now();
-  const wait = MIN_INTERVAL_MS - (now - lastCallTs);
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastCallTs = Date.now();
+  const p = queue.then(async (): Promise<HibpResult> => {
+    const now = Date.now();
+    const wait = MIN_INTERVAL_MS - (now - lastCallTs);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCallTs = Date.now();
 
-  try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
     const response = await fetch(
       `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=true`,
       {
@@ -40,8 +43,6 @@ export async function checkHIBP(
       },
     );
 
-    clearTimeout(timer);
-
     if (response.status === 200) {
       const breaches = await response.json();
       return { breached: true, breachCount: Array.isArray(breaches) ? breaches.length : 1 };
@@ -49,9 +50,13 @@ export async function checkHIBP(
     if (response.status === 404) {
       return { breached: false, breachCount: 0 };
     }
-    // 401 = bad key, 429 = rate limited
     return null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
+  });
+  queue = p.catch(() => {});
+  return p;
 }

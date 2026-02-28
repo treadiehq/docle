@@ -41,18 +41,15 @@ async function checkWebsite(
   domain: string,
   timeoutMs: number,
 ): Promise<{ alive: boolean | null; parked: boolean }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     const response = await fetch(`http://${domain}`, {
       method: "GET",
       redirect: "follow",
       signal: controller.signal,
       headers: { "User-Agent": "EmailVerify/1.0" },
     });
-
-    clearTimeout(timer);
 
     if (!response.ok) {
       return { alive: false, parked: false };
@@ -65,6 +62,8 @@ async function checkWebsite(
     return { alive: true, parked };
   } catch {
     return { alive: null, parked: false };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -76,16 +75,13 @@ async function checkDomainAge(
   domain: string,
   timeoutMs: number,
 ): Promise<number | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     const response = await fetch(`https://rdap.org/domain/${domain}`, {
       signal: controller.signal,
       headers: { Accept: "application/rdap+json" },
     });
-
-    clearTimeout(timer);
 
     if (!response.ok) return null;
 
@@ -104,6 +100,8 @@ async function checkDomainAge(
     return Math.floor((Date.now() - regDate.getTime()) / 86_400_000);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -187,3 +185,10 @@ export async function getDomainIntel(
   intelCache.set(domain, { result, expiresAt: Date.now() + CACHE_TTL_MS });
   return result;
 }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of intelCache) {
+    if (entry.expiresAt <= now) intelCache.delete(key);
+  }
+}, 60_000).unref();

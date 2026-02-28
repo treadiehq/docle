@@ -14,9 +14,7 @@ import { verifySmtp } from "~~/server/utils/smtp";
 import {
   checkRequestRate,
   checkDailyEmailCap,
-  recordEmailsUsed,
   checkGlobalCap,
-  recordGlobalEmails,
   acquireConcurrency,
   releaseConcurrency,
 } from "~~/server/utils/rate-limit";
@@ -396,9 +394,6 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
       return { email, domain, mx, smtp, status, confidence, notes, suggestedEmail, providerChecks, domainIntel };
     }),
   );
-
-  recordEmailsUsed(rateLimitKey, results.length);
-  recordGlobalEmails(results.length);
 
   if (agent?.uid) {
     recordAgentUsage(agent.uid, results.length);

@@ -6,22 +6,23 @@
 
 let lastCallTs = 0;
 const MIN_INTERVAL_MS = 6_500;
+let queue: Promise<unknown> = Promise.resolve();
 
-export async function checkGitHub(
+export function checkGitHub(
   email: string,
   timeoutMs: number = 5_000,
 ): Promise<boolean | null> {
-  const now = Date.now();
-  const wait = MIN_INTERVAL_MS - (now - lastCallTs);
-  if (wait > 0) {
-    await new Promise((r) => setTimeout(r, wait));
-  }
-  lastCallTs = Date.now();
+  const p = queue.then(async (): Promise<boolean | null> => {
+    const now = Date.now();
+    const wait = MIN_INTERVAL_MS - (now - lastCallTs);
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    lastCallTs = Date.now();
 
-  try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
     const response = await fetch(
       `https://api.github.com/search/users?q=${encodeURIComponent(email)}+in:email`,
       {
@@ -33,8 +34,6 @@ export async function checkGitHub(
       },
     );
 
-    clearTimeout(timer);
-
     if (response.status === 403 || response.status === 429) {
       return null;
     }
@@ -44,5 +43,10 @@ export async function checkGitHub(
     return (data?.total_count ?? 0) > 0;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
+  });
+  queue = p.catch(() => {});
+  return p;
 }

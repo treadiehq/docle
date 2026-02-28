@@ -16,24 +16,25 @@ const APPLE_DOMAINS = new Set([
 
 let lastCallTs = 0;
 const MIN_INTERVAL_MS = 2_000;
+let queue: Promise<unknown> = Promise.resolve();
 
 export function isAppleDomain(domain: string): boolean {
   return APPLE_DOMAINS.has(domain.toLowerCase());
 }
 
-export async function checkAppleAccount(
+export function checkAppleAccount(
   email: string,
   timeoutMs: number = 6_000,
 ): Promise<boolean | null> {
-  const now = Date.now();
-  const wait = MIN_INTERVAL_MS - (now - lastCallTs);
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastCallTs = Date.now();
+  const p = queue.then(async (): Promise<boolean | null> => {
+    const now = Date.now();
+    const wait = MIN_INTERVAL_MS - (now - lastCallTs);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCallTs = Date.now();
 
-  try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
     const response = await fetch(
       "https://appleid.apple.com/appleauth/auth/federate?isRememberMeEnabled=true",
       {
@@ -57,16 +58,12 @@ export async function checkAppleAccount(
       },
     );
 
-    clearTimeout(timer);
-
     if (response.status === 403 || response.status === 429) return null;
 
     if (response.status === 200) {
       try {
         const data = await response.json() as Record<string, unknown>;
-        // Real accounts have hasSWP: true and primaryAuthOptions
         if (data.hasSWP === true) return true;
-        // No hasSWP means account doesn't exist
         return false;
       } catch {
         return null;
@@ -76,5 +73,10 @@ export async function checkAppleAccount(
     return null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
+  });
+  queue = p.catch(() => {});
+  return p;
 }
