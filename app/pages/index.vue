@@ -29,11 +29,11 @@ const verifySteps = [
 
 function startStepCycle() {
   let idx = 0;
-  singleStep.value = verifySteps[0];
+  singleStep.value = verifySteps[0]!;
   stepTimer = setInterval(() => {
     idx++;
     if (idx < verifySteps.length) {
-      singleStep.value = verifySteps[idx];
+      singleStep.value = verifySteps[idx]!;
     }
   }, 1800);
 }

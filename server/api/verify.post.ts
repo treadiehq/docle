@@ -48,14 +48,14 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     "unknown"
   );
 
-  const reqPerMin = agent ? config.rateLimitAgentRequestsPerMinute as number : config.rateLimitRequestsPerMinute as number;
-  const dailyCap = agent ? config.rateLimitAgentDailyEmailCap as number : config.rateLimitDailyEmailCap as number;
-  const maxConc = agent ? config.rateLimitAgentMaxConcurrent as number : config.rateLimitMaxConcurrent as number;
+  const reqPerMin = Number(agent ? config.rateLimitAgentRequestsPerMinute : config.rateLimitRequestsPerMinute);
+  const dailyCap = Number(agent ? config.rateLimitAgentDailyEmailCap : config.rateLimitDailyEmailCap);
+  const maxConc = Number(agent ? config.rateLimitAgentMaxConcurrent : config.rateLimitMaxConcurrent);
 
   // 1. Request rate
   const rateCheck = checkRequestRate(rateLimitKey, reqPerMin);
   if (!rateCheck.allowed) {
-    setResponseHeader(event, "Retry-After", String(Math.ceil((rateCheck.retryAfterMs ?? 60_000) / 1000)));
+    setResponseHeader(event, "Retry-After", Math.ceil((rateCheck.retryAfterMs ?? 60_000) / 1000));
     throw createError({ statusCode: 429, statusMessage: rateCheck.reason });
   }
 
@@ -71,7 +71,7 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
   if (!body?.emails || !Array.isArray(body.emails)) {
     throw createError({ statusCode: 400, statusMessage: "emails[] required" });
   }
-  if (body.emails.length > (config.maxEmailsPerRequest as number)) {
+  if (body.emails.length > Number(config.maxEmailsPerRequest)) {
     throw createError({
       statusCode: 400,
       statusMessage: `Max ${config.maxEmailsPerRequest} emails per request`,
@@ -81,19 +81,19 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
   // 3. Daily email cap (per agent UID or per IP)
   const dailyCheck = checkDailyEmailCap(rateLimitKey, body.emails.length, dailyCap);
   if (!dailyCheck.allowed) {
-    setResponseHeader(event, "Retry-After", String(Math.ceil((dailyCheck.retryAfterMs ?? 86_400_000) / 1000)));
+    setResponseHeader(event, "Retry-After", Math.ceil((dailyCheck.retryAfterMs ?? 86_400_000) / 1000));
     throw createError({ statusCode: 429, statusMessage: dailyCheck.reason });
   }
   const emailsToProcess = body.emails.slice(0, dailyCheck.allowedCount);
 
   // 4. Global daily ceiling
-  const globalCheck = checkGlobalCap(emailsToProcess.length, config.rateLimitGlobalDailyCap as number);
+  const globalCheck = checkGlobalCap(emailsToProcess.length, Number(config.rateLimitGlobalDailyCap));
   if (!globalCheck.allowed) {
     throw createError({ statusCode: 503, statusMessage: globalCheck.reason });
   }
 
-  const limit = pLimit(config.dnsConcurrency as number);
-  const smtpTimeoutMs = (config.smtpTimeoutMs as number) || 10_000;
+  const limit = pLimit(Number(config.dnsConcurrency));
+  const smtpTimeoutMs = Number(config.smtpTimeoutMs) || 10_000;
 
   const domainMxMap = new Map<string, Promise<MxLookupResult | null>>();
   const domainHealthMap = new Map<string, Promise<DomainHealth>>();
@@ -106,8 +106,8 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
       pending = limit(() =>
         lookupMx(
           domain,
-          config.dnsTimeoutMs as number,
-          config.dnsCacheTtlMs as number,
+          Number(config.dnsTimeoutMs),
+          Number(config.dnsCacheTtlMs),
         ),
       );
       domainMxMap.set(domain, pending);
@@ -119,7 +119,7 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
     let pending = domainHealthMap.get(domain);
     if (!pending) {
       pending = limit(() =>
-        checkDomainHealth(domain, config.dnsTimeoutMs as number),
+        checkDomainHealth(domain, Number(config.dnsTimeoutMs)),
       );
       domainHealthMap.set(domain, pending);
     }
@@ -138,7 +138,7 @@ export default defineEventHandler(async (event): Promise<VerifyResponse> => {
   function getDkim(domain: string): Promise<DkimSignals> {
     let pending = domainDkimMap.get(domain);
     if (!pending) {
-      pending = limit(() => checkDkimSignals(domain, config.dnsTimeoutMs as number));
+      pending = limit(() => checkDkimSignals(domain, Number(config.dnsTimeoutMs)));
       domainDkimMap.set(domain, pending);
     }
     return pending;

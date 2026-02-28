@@ -38,4 +38,13 @@ export interface VerifyRequest {
 
 export interface VerifyResponse {
   results: VerifyResult[];
+  agent?: {
+    uid: string;
+    usage: {
+      emailsVerified: number;
+      requests: number;
+      dailyLimit: number;
+      remaining: number;
+    };
+  };
 }

@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   const url = `${proto}://${host}${event.path}`;
 
   try {
-    const agent = await vestauth.tool.verify(event.method, url, getHeaders(event));
+    const agent = await (vestauth as any).tool.verify(event.method, url, getHeaders(event));
     event.context.agent = agent;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "signature verification failed";
